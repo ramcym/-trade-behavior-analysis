@@ -20,6 +20,10 @@ data/
 *.csv
 交易总结.txt
 
+# Public sample files
+!examples/
+!examples/*.csv
+
 # OS / editors
 .DS_Store
 Thumbs.db

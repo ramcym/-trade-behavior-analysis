@@ -12,24 +12,106 @@
 - 计算模式内/模式外交易表现、知行合一分、情绪风险和仓位建议。
 - 生成每日、每周进步曲线，让交易改进可视化。
 
-## 快速开始
+## 新手推荐方式
 
-### Web 系统
+如果你不会用命令行，可以先只做三件事：
 
-v1 重点分析“是否按交易系统执行”，不依赖大盘、板块或个股分时：
+1. 安装 Python 3.10 或以上版本。
+2. 下载项目，解压后进入项目目录。
+3. Windows 用户双击运行 `start_windows.bat`。
+
+项目会自动安装依赖，并启动本地 Web 页面：
+
+```text
+http://127.0.0.1:8765/
+```
+
+第一次运行时，如果你还没有准备交割单，系统会使用 `examples/trades_template.csv` 示例模板启动。你可以先看页面效果，再把自己的交割单放到 `data/trades.xls` 后重新启动。
+
+## 快速开始：本地 Web 版
+
+### 1. 安装 Python
+
+请先安装 Python 3.10 或以上版本。
+
+### 2. 下载项目
+
+点击 GitHub 页面右上角绿色 `Code` 按钮，选择 `Download ZIP`，解压后进入项目目录。
+
+### 3. 安装依赖
+
+Windows PowerShell：
+
+```powershell
+pip install -r requirements.txt
+```
+
+Mac / Linux：
+
+```bash
+pip install -r requirements.txt
+```
+
+### 4. 准备交割单
+
+在项目根目录新建 `data` 文件夹，把你的交割单放进去，例如：
+
+```text
+data/trades.xls
+```
+
+支持 `.xls`、`.xlsx`、`.csv`。如果你不确定格式，可以先打开 `examples/trades_template.csv` 看示例字段。
+
+### 5. 启动 Web 系统
+
+Windows PowerShell：
 
 ```powershell
 $env:PYTHONPATH="src"
 python -m trade_review.behavior_server --trades data/trades.xls --port 8765
 ```
 
-然后打开：
+Mac / Linux：
+
+```bash
+PYTHONPATH=src python -m trade_review.behavior_server --trades data/trades.xls --port 8765
+```
+
+### 6. 打开浏览器
+
+访问：
 
 ```text
 http://127.0.0.1:8765/
 ```
 
-页面支持：
+然后在页面里导入交割单、标注交易行为、查看诊断结果。
+
+## 一键启动脚本
+
+Windows：
+
+```text
+start_windows.bat
+```
+
+Mac / Linux：
+
+```bash
+chmod +x start_mac_linux.sh
+./start_mac_linux.sh
+```
+
+脚本会自动按顺序寻找交割单：
+
+1. `data/trades.xls`
+2. `data/trades.xlsx`
+3. `data/trades.csv`
+4. `examples/trades_template.csv`
+
+## 页面功能
+
+v1 重点分析“是否按交易系统执行”，不依赖大盘、板块或个股分时。页面支持：
 
 - 导入 `.xls`、`.xlsx`、`.csv` 交割单
 - 自动生成闭合交易、大肉、大亏

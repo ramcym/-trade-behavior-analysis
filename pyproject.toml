@@ -1,0 +1,26 @@
+[project]
+name = "delivery-note-review"
+version = "0.1.0"
+description = "A股交割单复盘分析工具：大盘、题材/板块、个股分时共振与点火/低吸买点识别"
+requires-python = ">=3.10"
+dependencies = [
+    "pandas>=2.0",
+    "openpyxl>=3.1",
+]
+
+[project.optional-dependencies]
+market = [
+    "akshare>=1.16",
+]
+dev = [
+    "pytest>=8.0",
+]
+
+[project.scripts]
+trade-review = "trade_review.cli:main"
+sector-divergence = "trade_review.sector_divergence:main"
+trade-behavior = "trade_review.behavior_server:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

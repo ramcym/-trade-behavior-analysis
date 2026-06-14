@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>交割单行为诊断</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <aside class="sidebar">
+      <div class="brand">行为诊断</div>
+      <button data-view="dashboard" class="nav active">总览</button>
+      <button data-view="review" class="nav">问卷标注</button>
+      <button data-view="winsLosses" class="nav">大肉 / 大亏</button>
+      <button data-view="emotion" class="nav">情绪周期</button>
+      <button data-view="progress" class="nav">进步曲线</button>
+    </aside>
+    <main>
+      <header>
+        <div>
+          <h1>交割单行为诊断系统</h1>
+          <p id="subtitle">用执行质量评价交易，而不是只看盈亏。</p>
+        </div>
+        <div class="header-actions">
+          <label class="import-button">
+            导入交割单
+            <input id="importFile" type="file" accept=".xls,.xlsx,.csv" />
+          </label>
+          <button id="exportReport">生成报告</button>
+        </div>
+      </header>
+      <section id="app"></section>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>

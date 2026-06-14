@@ -1,0 +1,5 @@
+pandas>=2.0
+openpyxl>=3.1
+
+# Optional: install this when you want automatic A-share intraday/index/board data.
+# akshare>=1.16

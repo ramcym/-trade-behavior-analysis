@@ -332,14 +332,84 @@ def save_annotations(path: str | Path, annotations: dict[str, TradeAnnotation]) 
 
 def ensure_annotation_file(trades: list[ClosedTrade], path: str | Path) -> dict[str, TradeAnnotation]:
     annotations = load_annotations(path)
+    by_stable_key = stable_annotation_index(annotations)
+    stable_key_offsets: dict[str, int] = {}
     changed = False
     for trade in trades:
+        key = stable_trade_key(trade.trade_id)
         if trade.trade_id not in annotations:
-            annotations[trade.trade_id] = TradeAnnotation(trade.trade_id)
+            migrated = next_stable_annotation(by_stable_key, stable_key_offsets, key)
+            if migrated:
+                annotations[trade.trade_id] = copy_annotation(migrated, trade.trade_id)
+            else:
+                annotations[trade.trade_id] = TradeAnnotation(trade.trade_id)
             changed = True
+        elif not meaningful_annotation(annotations[trade.trade_id]):
+            migrated = next_stable_annotation(by_stable_key, stable_key_offsets, key)
+            if migrated and migrated.trade_id != trade.trade_id:
+                annotations[trade.trade_id] = copy_annotation(migrated, trade.trade_id)
+                changed = True
     if changed or not Path(path).exists():
         save_annotations(path, annotations)
     return annotations
+
+
+def stable_trade_key(trade_id: str) -> str:
+    parts = trade_id.split("_", 1)
+    return parts[1] if len(parts) == 2 else trade_id
+
+
+def stable_annotation_index(annotations: dict[str, TradeAnnotation]) -> dict[str, list[TradeAnnotation]]:
+    buckets: dict[str, list[TradeAnnotation]] = {}
+    for annotation in annotations.values():
+        if meaningful_annotation(annotation):
+            buckets.setdefault(stable_trade_key(annotation.trade_id), []).append(annotation)
+    return {key: sorted(items, key=lambda item: item.trade_id) for key, items in buckets.items()}
+
+
+def next_stable_annotation(
+    index: dict[str, list[TradeAnnotation]],
+    offsets: dict[str, int],
+    key: str,
+) -> TradeAnnotation | None:
+    items = index.get(key, [])
+    offset = offsets.get(key, 0)
+    offsets[key] = offset + 1
+    if offset >= len(items):
+        return None
+    return items[offset]
+
+
+def meaningful_annotation(annotation: TradeAnnotation) -> bool:
+    return any(
+        [
+            annotation.system_fit != "未标注",
+            annotation.plan_follow != "未标注",
+            annotation.emotion_state != "未标注",
+            bool(annotation.emotion_sources),
+            annotation.buy_quality != "未标注",
+            annotation.position_quality != "未标注",
+            annotation.stop_execution != "未标注",
+            annotation.trade_type != "UNMARKED",
+            annotation.entry_model != "UNMARKED",
+            annotation.market_condition != "UNMARKED",
+            annotation.sector_condition != "UNMARKED",
+            annotation.stock_position != "UNMARKED",
+            annotation.signal_quality != "UNMARKED",
+            annotation.exit_reason != "UNMARKED",
+            annotation.avoidable_loss != "UNMARKED",
+            bool(annotation.avoidable_reason),
+            bool(annotation.error_codes),
+            annotation.plan_follow_score is not None,
+            bool(annotation.notes),
+        ]
+    )
+
+
+def copy_annotation(annotation: TradeAnnotation, trade_id: str) -> TradeAnnotation:
+    values = asdict(annotation)
+    values["trade_id"] = trade_id
+    return TradeAnnotation(**values)
 
 
 def update_annotation(path: str | Path, trade_id: str, values: dict[str, Any]) -> TradeAnnotation:

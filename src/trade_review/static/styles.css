@@ -260,6 +260,26 @@ textarea {
   border-color: var(--accent);
 }
 
+.question-card {
+  background: #f8fafc;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin: 14px 0;
+}
+
+.question-card ol {
+  margin: 8px 0 0 20px;
+  padding: 0;
+  color: var(--muted);
+}
+
+.error-chip.active {
+  background: #fee2e2;
+  border-color: var(--bad);
+  color: var(--bad);
+}
+
 .bar {
   height: 12px;
   background: #e5e7eb;

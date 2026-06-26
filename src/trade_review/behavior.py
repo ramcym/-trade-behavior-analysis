@@ -16,6 +16,44 @@ EMOTION_SOURCES = ["连续盈利", "大赚后", "连续亏损", "想翻本", "�
 BUY_QUALITIES = ["计划买点", "提前买", "追高买", "翘板买", "补救买", "随手买", "未标注"]
 POSITION_QUALITIES = ["合理", "偏重", "过重", "连续盈利后放大", "亏损后加仓", "未标注"]
 STOP_EXECUTIONS = ["严格执行", "延迟执行", "没有执行", "不适用", "未标注"]
+TRADE_TYPES = ["CORE_LEADER", "MID_CORE", "FOLLOWER", "EMOTION_TRADE", "UNMARKED"]
+ENTRY_MODELS = ["IGNITION", "DIVERGENCE", "CHASE_HIGH", "RANDOM", "UNMARKED"]
+MARKET_CONDITIONS = ["INDEX_UP", "INDEX_DOWN", "INDEX_FLAT", "UNMARKED"]
+SECTOR_CONDITIONS = ["SECTOR_STRONG", "SECTOR_WEAK", "SECTOR_DIVERGE", "UNMARKED"]
+STOCK_POSITIONS = ["FIRST_CHOICE", "SECOND_CHOICE", "NOT_CORE", "UNMARKED"]
+SIGNAL_QUALITIES = ["FULL_CONFIRM", "MISSING_ONE", "MISSING_MULTI", "UNMARKED"]
+EXIT_REASONS = [
+    "STOP_LOSS",
+    "TAKE_PROFIT",
+    "SECTOR_DIVERGENCE",
+    "STOCK_DIVERGENCE",
+    "INDEX_WEAKNESS",
+    "RULE_VIOLATION",
+    "UNMARKED",
+]
+AVOIDABLE_LOSSES = ["YES", "NO", "UNMARKED"]
+AVOIDABLE_REASONS = [
+    "非核心杂毛",
+    "连续盈利后降低标准",
+    "顶背离追点火",
+    "第一选择没买，买了第二选择",
+    "大盘不配合",
+    "板块不配合",
+    "没有及时止损",
+    "情绪化想赚回来",
+]
+ERROR_CODES = {
+    "E01": "杂毛交易",
+    "E02": "连续盈利后降低标准",
+    "E03": "顶背离追点火",
+    "E04": "第一选择没买，买第二选择",
+    "E05": "大盘不配合仍买入",
+    "E06": "板块不配合仍买入",
+    "E07": "指数回流预期覆盖个股负面信号",
+    "E08": "亏损后不止损，幻想修复",
+    "E09": "把杂毛当龙头格局",
+    "E10": "系统A买入，系统B卖出，买卖逻辑混乱",
+}
 
 SYSTEM_IN = {"完全符合", "基本符合"}
 SYSTEM_OUT = {"完全不符合"}
@@ -66,6 +104,16 @@ class TradeAnnotation:
     buy_quality: str = "未标注"
     position_quality: str = "未标注"
     stop_execution: str = "未标注"
+    trade_type: str = "UNMARKED"
+    entry_model: str = "UNMARKED"
+    market_condition: str = "UNMARKED"
+    sector_condition: str = "UNMARKED"
+    stock_position: str = "UNMARKED"
+    signal_quality: str = "UNMARKED"
+    exit_reason: str = "UNMARKED"
+    avoidable_loss: str = "UNMARKED"
+    avoidable_reason: str = ""
+    error_codes: list[str] = field(default_factory=list)
     plan_follow_score: int | None = None
     notes: str = ""
 
@@ -81,6 +129,7 @@ class BehaviorDiagnosis:
     risk_model: dict[str, Any]
     progress: list[dict[str, Any]]
     weekly_progress: list[dict[str, Any]]
+    attribution: dict[str, Any]
     conclusions: list[str]
 
 
@@ -143,17 +192,26 @@ def load_raw_trade_rows(trades_path: str | Path) -> list[RawTradeRow]:
     rows: list[RawTradeRow] = []
     for _, row in df.iterrows():
         try:
-            dt = parse_trade_datetime(row.iloc[0], row.iloc[1])
-            code = normalize_code(row.iloc[2])
-            name = str(row.iloc[3])
-            quantity = float_or_zero(row.iloc[5])
-            price = float_or_zero(row.iloc[7])
-            amount = float_or_zero(row.iloc[8])
-            net_amount = float_or_zero(row.iloc[11])
-            fee = float_or_zero(row.iloc[12]) + float_or_zero(row.iloc[13]) + float_or_zero(row.iloc[14])
+            dt = parse_trade_datetime(field(row, ["成交日期", "交易日期", "日期"], 0), field(row, ["成交时间", "交易时间", "时间"], 1))
+            code = normalize_code(field(row, ["证券代码", "股票代码", "代码"], 2))
+            name = str(field(row, ["证券名称", "股票名称", "名称"], 3))
+            side_text = str(field(row, ["操作", "买卖方向", "业务名称"], 4))
+            quantity = float_or_zero(field(row, ["成交数量", "成交股数", "数量"], 5))
+            price = float_or_zero(field(row, ["成交均价", "成交价格", "成交价", "价格"], 7))
+            amount = float_or_zero(field(row, ["成交金额", "金额"], 8))
+            net_amount = float_or_zero(field(row, ["发生金额", "本次金额"], 11))
+            fee = sum(
+                float_or_zero(field(row, [name], fallback_idx, default=0))
+                for name, fallback_idx in [("手续费", 12), ("印花税", 13), ("其他杂费", 14)]
+            )
         except Exception as exc:
             raise ValueError("交割单格式暂不支持，请确认前 15 列是券商标准导出。") from exc
-        side = "buy" if net_amount < 0 else "sell"
+        if "买" in side_text and "卖" not in side_text:
+            side = "buy"
+        elif "卖" in side_text:
+            side = "sell"
+        else:
+            side = "buy" if net_amount < 0 else "sell"
         rows.append(
             RawTradeRow(
                 dt=dt,
@@ -167,6 +225,17 @@ def load_raw_trade_rows(trades_path: str | Path) -> list[RawTradeRow]:
             )
         )
     return rows
+
+
+def field(row: Any, names: list[str], fallback_idx: int, default: Any | None = None) -> Any:
+    normalized = {str(column).strip().lower().replace(" ", ""): column for column in row.index}
+    for name in names:
+        key = name.strip().lower().replace(" ", "")
+        if key in normalized:
+            return row[normalized[key]]
+    if fallback_idx < len(row):
+        return row.iloc[fallback_idx]
+    return default
 
 
 def assign_trade_metadata(trades: list[ClosedTrade]) -> None:
@@ -232,6 +301,16 @@ def load_annotations(path: str | Path) -> dict[str, TradeAnnotation]:
             buy_quality=str(item.get("buy_quality", "未标注")),
             position_quality=str(item.get("position_quality", "未标注")),
             stop_execution=str(item.get("stop_execution", "未标注")),
+            trade_type=str(item.get("trade_type", "UNMARKED")),
+            entry_model=str(item.get("entry_model", "UNMARKED")),
+            market_condition=str(item.get("market_condition", "UNMARKED")),
+            sector_condition=str(item.get("sector_condition", "UNMARKED")),
+            stock_position=str(item.get("stock_position", "UNMARKED")),
+            signal_quality=str(item.get("signal_quality", "UNMARKED")),
+            exit_reason=str(item.get("exit_reason", "UNMARKED")),
+            avoidable_loss=str(item.get("avoidable_loss", "UNMARKED")),
+            avoidable_reason=str(item.get("avoidable_reason", "")),
+            error_codes=list(item.get("error_codes", [])),
             plan_follow_score=item.get("plan_follow_score"),
             notes=str(item.get("notes", "")),
         )
@@ -300,7 +379,8 @@ def diagnose_behavior(trades: list[ClosedTrade], annotations: dict[str, TradeAnn
     risk_model = compute_risk_model(rows)
     progress = compute_progress(rows)
     weekly_progress = compute_weekly_progress(rows)
-    conclusions = build_conclusions(summary, groups, simulations, emotion, risk_model)
+    attribution = compute_attribution(rows, groups, simulations)
+    conclusions = build_conclusions(summary, groups, simulations, emotion, risk_model, attribution)
     return BehaviorDiagnosis(
         trades=rows,
         annotations={key: asdict(value) for key, value in annotations.items()},
@@ -311,6 +391,7 @@ def diagnose_behavior(trades: list[ClosedTrade], annotations: dict[str, TradeAnn
         risk_model=risk_model,
         progress=progress,
         weekly_progress=weekly_progress,
+        attribution=attribution,
         conclusions=conclusions,
     )
 
@@ -366,6 +447,7 @@ def compute_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
 def compute_simulations(rows: list[dict[str, Any]]) -> dict[str, Any]:
     actual = sum(row["pnl"] for row in rows)
     without_system_out = sum(row["pnl"] for row in rows if row.get("system_fit") not in SYSTEM_OUT)
+    avoidable_loss_half_reduced = actual + sum(abs(row["pnl"]) * 0.5 for row in avoidable_loss_rows(rows))
     strict_stop = sum(max(row["pnl"], -0.03 * row["buy_amount"]) for row in rows)
     half_after_three_wins = 0.0
     out_position_cap = 0.0
@@ -380,10 +462,68 @@ def compute_simulations(rows: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "actual_pnl": round(actual, 2),
         "without_system_out_pnl": round(without_system_out, 2),
+        "avoidable_loss_half_reduced_pnl": round(avoidable_loss_half_reduced, 2),
         "strict_stop_3pct_pnl": round(strict_stop, 2),
         "half_size_after_three_wins_pnl": round(half_after_three_wins, 2),
         "system_out_20pct_size_pnl": round(out_position_cap, 2),
         "no_afternoon_emotion_pnl": round(no_afternoon_emotion, 2),
+    }
+
+
+def avoidable_loss_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [row for row in rows if row.get("pnl", 0) < 0 and row.get("avoidable_loss") == "YES"]
+
+
+def system_out_loss_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [row for row in rows if row.get("pnl", 0) < 0 and row.get("system_fit") in SYSTEM_OUT]
+
+
+def compute_attribution(
+    rows: list[dict[str, Any]],
+    groups: dict[str, dict[str, Any]],
+    simulations: dict[str, Any],
+) -> dict[str, Any]:
+    total = len(rows)
+    total_loss = sum(abs(row["pnl"]) for row in rows if row.get("pnl", 0) < 0)
+    avoidable_rows = avoidable_loss_rows(rows)
+    avoidable_amount = sum(abs(row["pnl"]) for row in avoidable_rows)
+    system_out_loss = sum(abs(row["pnl"]) for row in system_out_loss_rows(rows))
+    error_stats: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        for code in row.get("error_codes", []):
+            if code not in ERROR_CODES:
+                continue
+            stat = error_stats.setdefault(
+                code,
+                {"code": code, "name": ERROR_CODES[code], "count": 0, "loss_amount": 0.0, "pnl": 0.0},
+            )
+            stat["count"] += 1
+            stat["pnl"] += row.get("pnl", 0)
+            if row.get("pnl", 0) < 0:
+                stat["loss_amount"] += abs(row["pnl"])
+    ranked_errors = sorted(
+        (
+            {
+                **stat,
+                "loss_amount": round(stat["loss_amount"], 2),
+                "pnl": round(stat["pnl"], 2),
+            }
+            for stat in error_stats.values()
+        ),
+        key=lambda item: (item["loss_amount"], item["count"]),
+        reverse=True,
+    )
+    return {
+        "mode_in_ratio": round(groups["system_in"]["count"] / total * 100, 1) if total else 0.0,
+        "system_out_loss_amount": round(system_out_loss, 2),
+        "system_out_loss_ratio": round(system_out_loss / total_loss * 100, 1) if total_loss else 0.0,
+        "total_loss_amount": round(total_loss, 2),
+        "avoidable_loss_amount": round(avoidable_amount, 2),
+        "avoidable_loss_ratio": round(avoidable_amount / total_loss * 100, 1) if total_loss else 0.0,
+        "avoidable_loss_half_reduced_pnl": simulations["avoidable_loss_half_reduced_pnl"],
+        "without_system_out_pnl": simulations["without_system_out_pnl"],
+        "error_code_stats": ranked_errors,
+        "biggest_error_code": ranked_errors[0] if ranked_errors else None,
     }
 
 
@@ -540,6 +680,7 @@ def build_conclusions(
     simulations: dict[str, Any],
     emotion: dict[str, dict[str, Any]],
     risk_model: dict[str, Any],
+    attribution: dict[str, Any],
 ) -> list[str]:
     conclusions: list[str] = []
     annotated = summary.get("annotated_count", 0)
@@ -553,6 +694,14 @@ def build_conclusions(
         conclusions.append("系统内交易仍为负期望，需要回到入场逻辑本身做优化。")
     if system_out["pnl"] < 0:
         conclusions.append(f"模式外交易拖累 {abs(system_out['pnl']):.2f}，应先压缩到总交易的 10% 以下。")
+    if attribution["avoidable_loss_amount"] > 0:
+        conclusions.append(
+            f"已标注可避免亏损 {attribution['avoidable_loss_amount']:.2f}，"
+            f"占总亏损 {attribution['avoidable_loss_ratio']:.1f}%；若减少一半，本期盈亏约 {attribution['avoidable_loss_half_reduced_pnl']:.2f}。"
+        )
+    if attribution["biggest_error_code"]:
+        biggest = attribution["biggest_error_code"]
+        conclusions.append(f"当前最大错误编号是 {biggest['code']} {biggest['name']}，对应亏损 {biggest['loss_amount']:.2f}。")
     if emotion["连续盈利3笔后"]["count"] and emotion["连续盈利3笔后"]["pnl"] < 0:
         conclusions.append("连续盈利后的交易为负贡献，建议连续盈利 3 笔后自动降仓或休息。")
     if simulations["strict_stop_3pct_pnl"] > simulations["actual_pnl"]:
@@ -595,6 +744,18 @@ def render_behavior_markdown(diagnosis: BehaviorDiagnosis) -> str:
     lines.extend(["## 修正模拟", ""])
     for key, value in diagnosis.simulations.items():
         lines.append(f"- {key}: {value}")
+    lines.extend(["", "## 错误归因", ""])
+    attr = diagnosis.attribution
+    lines.append(f"- 模式内交易占比：{attr['mode_in_ratio']}%")
+    lines.append(f"- 模式外亏损占比：{attr['system_out_loss_ratio']}%")
+    lines.append(f"- 可避免亏损金额：{attr['avoidable_loss_amount']}")
+    lines.append(f"- 可避免亏损占比：{attr['avoidable_loss_ratio']}%")
+    lines.append(f"- 可避免亏损减少 50% 后盈亏：{attr['avoidable_loss_half_reduced_pnl']}")
+    lines.append(f"- 去掉模式外交易后盈亏：{attr['without_system_out_pnl']}")
+    if attr["error_code_stats"]:
+        lines.extend(["", "| 错误编号 | 错误 | 次数 | 亏损金额 | 净盈亏 |", "| --- | --- | ---: | ---: | ---: |"])
+        for item in attr["error_code_stats"]:
+            lines.append(f"| {item['code']} | {item['name']} | {item['count']} | {item['loss_amount']} | {item['pnl']} |")
     lines.extend(["", "## 凯利仓位建议", "", diagnosis.risk_model["formula"], ""])
     for profile in diagnosis.risk_model["profiles"]:
         lines.append(

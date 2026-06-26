@@ -57,6 +57,7 @@ function renderDashboard() {
       ${kpi("剔除模式外", fmtMoney(sim.without_system_out_pnl), cls(sim.without_system_out_pnl))}
       ${kpi("-3%止损模拟", fmtMoney(sim.strict_stop_3pct_pnl), cls(sim.strict_stop_3pct_pnl))}
     </div>
+    ${attributionPanel(d.attribution)}
     <h2>核心结论</h2>
     <div class="card">${d.conclusions.map((item) => `<p>${item}</p>`).join("")}</div>
     <h2>凯利仓位策略</h2>
@@ -87,7 +88,35 @@ function renderDashboard() {
       ${kpi("连续盈利后半仓", fmtMoney(sim.half_size_after_three_wins_pnl), cls(sim.half_size_after_three_wins_pnl))}
       ${kpi("模式外降至2成", fmtMoney(sim.system_out_20pct_size_pnl), cls(sim.system_out_20pct_size_pnl))}
       ${kpi("禁止午后情绪单", fmtMoney(sim.no_afternoon_emotion_pnl), cls(sim.no_afternoon_emotion_pnl))}
+      ${kpi("可避免亏损减半", fmtMoney(sim.avoidable_loss_half_reduced_pnl), cls(sim.avoidable_loss_half_reduced_pnl))}
     </div>
+  `;
+}
+
+function attributionPanel(attr) {
+  if (!attr) return "";
+  const errors = attr.error_code_stats || [];
+  return `
+    <h2>交易行为归因</h2>
+    <div class="grid kpis">
+      ${kpi("模式内占比", `${attr.mode_in_ratio}%`, "")}
+      ${kpi("模式外亏损占比", `${attr.system_out_loss_ratio}%`, attr.system_out_loss_ratio > 30 ? "bad" : "")}
+      ${kpi("可避免亏损", fmtMoney(-attr.avoidable_loss_amount), attr.avoidable_loss_amount > 0 ? "bad" : "")}
+      ${kpi("可避免亏损占比", `${attr.avoidable_loss_ratio}%`, attr.avoidable_loss_ratio > 30 ? "bad" : "")}
+      ${kpi("去掉模式外", fmtMoney(attr.without_system_out_pnl), cls(attr.without_system_out_pnl))}
+    </div>
+    <div class="card">
+      <strong>最大错误：</strong>
+      ${attr.biggest_error_code ? `${attr.biggest_error_code.code} ${attr.biggest_error_code.name}，亏损 ${fmtMoney(-attr.biggest_error_code.loss_amount)}` : "暂无错误编号标注"}
+    </div>
+    ${errors.length ? `
+      <table>
+        <thead><tr><th>错误编号</th><th>错误</th><th>次数</th><th>亏损金额</th><th>净盈亏</th></tr></thead>
+        <tbody>${errors.map((item) => `<tr>
+          <td>${item.code}</td><td>${item.name}</td><td>${item.count}</td>
+          <td class="bad">${fmtMoney(-item.loss_amount)}</td><td class="${cls(item.pnl)}">${fmtMoney(item.pnl)}</td>
+        </tr>`).join("")}</tbody>
+      </table>` : ""}
   `;
 }
 
@@ -142,8 +171,31 @@ function annotationForm(t) {
       ${selectField("position_quality", "仓位质量", t.position_quality)}
       ${selectField("stop_execution", "止损执行", t.stop_execution)}
     </div>
+    <h3>交易行为归因</h3>
+    <div class="form-grid">
+      ${selectField("trade_type", "1. 是否核心龙头", t.trade_type)}
+      ${selectField("stock_position", "2. 是否市场第一选择", t.stock_position)}
+      ${selectField("market_condition", "3. 大盘是否配合", t.market_condition)}
+      ${selectField("sector_condition", "4. 板块是否配合", t.sector_condition)}
+      ${selectField("signal_quality", "5-6. 个股/点火确认质量", t.signal_quality)}
+      ${selectField("entry_model", "买入模式", t.entry_model)}
+      ${selectField("exit_reason", "卖出原因", t.exit_reason)}
+      ${selectField("avoidable_loss", "12. 亏损是否可避免", t.avoidable_loss)}
+      ${selectField("avoidable_reason", "可避免亏损原因", t.avoidable_reason)}
+    </div>
+    <div class="question-card">
+      <strong>纪律检查</strong>
+      <ol>
+        <li>是否存在顶背离？若是，标记 E03。</li>
+        <li>是否连续盈利后出手？若降低标准，标记 E02。</li>
+        <li>是否因为错过第一目标而买第二目标？若是，标记 E04。</li>
+        <li>如果今天只能买一只股票，我还会买它吗？写入备注。</li>
+      </ol>
+    </div>
     <h3>情绪来源</h3>
     <div class="chips">${state.choices.emotion_sources.map((item) => `<button class="chip ${t.emotion_sources.includes(item) ? "active" : ""}" data-source="${item}">${item}</button>`).join("")}</div>
+    <h3>错误编号</h3>
+    <div class="chips">${Object.entries(state.choices.error_codes || {}).map(([code, name]) => `<button class="chip error-chip ${(t.error_codes || []).includes(code) ? "active" : ""}" data-error="${code}">${code} ${name}</button>`).join("")}</div>
     <label class="notes">备注<textarea id="notes">${t.notes || ""}</textarea></label>
     <div class="card">
       <strong>知行合一分：</strong>${t.plan_follow_score ?? "未评分"}
@@ -191,9 +243,17 @@ function restoreReviewScroll() {
 
 function bindForm(t) {
   const sources = new Set(t.emotion_sources || []);
+  const errors = new Set(t.error_codes || []);
   document.querySelectorAll(".chip").forEach((chip) => {
     chip.addEventListener("click", (event) => {
       event.preventDefault();
+      if (chip.dataset.error) {
+        const value = chip.dataset.error;
+        if (errors.has(value)) errors.delete(value);
+        else errors.add(value);
+        chip.classList.toggle("active");
+        return;
+      }
       const value = chip.dataset.source;
       if (sources.has(value)) sources.delete(value);
       else sources.add(value);
@@ -212,6 +272,16 @@ function bindForm(t) {
       buy_quality: value("buy_quality"),
       position_quality: value("position_quality"),
       stop_execution: value("stop_execution"),
+      trade_type: value("trade_type"),
+      entry_model: value("entry_model"),
+      market_condition: value("market_condition"),
+      sector_condition: value("sector_condition"),
+      stock_position: value("stock_position"),
+      signal_quality: value("signal_quality"),
+      exit_reason: value("exit_reason"),
+      avoidable_loss: value("avoidable_loss"),
+      avoidable_reason: value("avoidable_reason"),
+      error_codes: [...errors],
       notes: document.getElementById("notes").value,
     };
     await fetch("/api/annotation", {
